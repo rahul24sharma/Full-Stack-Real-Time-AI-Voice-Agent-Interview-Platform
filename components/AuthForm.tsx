@@ -4,11 +4,11 @@ import { z } from "zod";
 import Link from "next/link";
 import Image from "next/image";
 import { toast } from "sonner";
-import { auth } from "@/firebase/client";
+import { auth, db } from "@/firebase/client";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-
+import { setDoc, doc } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -25,6 +25,8 @@ const authFormSchema = (type: FormType) => {
     name: type === "sign-up" ? z.string().min(3) : z.string().optional(),
     email: z.string().email(),
     password: z.string().min(3),
+    profilePic: type === "sign-up" ? z.any() : z.any().optional(),
+    resume: type === "sign-up" ? z.any() : z.any().optional(),
   });
 };
 
@@ -41,43 +43,121 @@ const AuthForm = ({ type }: { type: FormType }) => {
     },
   });
 
+  // const onSubmit = async (data: z.infer<typeof formSchema>) => {
+  //   try {
+  //     if (type === "sign-up") {
+  //       const { name, email, password } = data;
+
+  //       const userCredential = await createUserWithEmailAndPassword(
+  //         auth,
+  //         email,
+  //         password
+  //       );
+
+  //       const result = await signUp({
+  //         uid: userCredential.user.uid,
+  //         name: name!,
+  //         email,
+  //         password,
+  //       });
+  //       console.log(result);
+
+  //       if (!result.success) {
+  //         toast.error(result.message);
+  //         return;
+  //       }
+
+  //       toast.success("Account created successfully. Please sign in.");
+  //       router.push("/sign-in");
+  //     } else {
+  //       const { email, password } = data;
+
+  //       const userCredential = await signInWithEmailAndPassword(
+  //         auth,
+  //         email,
+  //         password
+  //       );
+
+  //       const idToken = await userCredential.user.getIdToken();
+  //       if (!idToken) {
+  //         toast.error("Sign in Failed. Please try again.");
+  //         return;
+  //       }
+
+  //       await signIn({
+  //         email,
+  //         idToken,
+  //       });
+
+  //       toast.success("Signed in successfully.");
+  //       router.push("/");
+  //     }
+  //   } catch (error) {
+  //     console.log(error);
+  //     toast.error(`There was an error: ${error}`);
+  //   }
+  // };
+
+  const fileToBase64 = async (file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     try {
-      if (type === "sign-up") {
-        const { name, email, password } = data;
+      const email = data.email.trim().toLowerCase();
+      const password = data.password.trim();
 
+      if (type === "sign-up") {
+        const { name, profilePic, resume } = data;
+
+        // Step 1: Create user in Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           email,
           password
         );
+        const uid = userCredential.user.uid;
 
-        const result = await signUp({
-          uid: userCredential.user.uid,
-          name: name!,
-          email,
-          password,
-        });
+        // Step 2: Process file uploads
+        let profileURL = "";
+        let resumeURL = "";
 
-        if (!result.success) {
-          toast.error(result.message);
-          return;
+        if (profilePic?.[0]) {
+          profileURL = await fileToBase64(profilePic[0]);
         }
+
+        if (resume?.[0]) {
+          resumeURL = await fileToBase64(resume[0]);
+        }
+
+        // Step 3: Save user metadata in Firestore
+        await setDoc(doc(db, "users", uid), {
+          uid,
+          name,
+          email,
+          profilePic: profileURL,
+          resume: resumeURL,
+          createdAt: new Date().toISOString(),
+        });
 
         toast.success("Account created successfully. Please sign in.");
         router.push("/sign-in");
       } else {
-        const { email, password } = data;
-
+        // Sign in flow
         const userCredential = await signInWithEmailAndPassword(
           auth,
           email,
           password
         );
-
         const idToken = await userCredential.user.getIdToken();
+
         if (!idToken) {
-          toast.error("Sign in Failed. Please try again.");
+          toast.error("Sign in failed. Please try again.");
           return;
         }
 
@@ -89,9 +169,10 @@ const AuthForm = ({ type }: { type: FormType }) => {
         toast.success("Signed in successfully.");
         router.push("/");
       }
-    } catch (error) {
-      console.log(error);
-      toast.error(`There was an error: ${error}`);
+    } catch (error: any) {
+      console.error("Auth error:", error);
+      const errorMessage = error?.message || "An unexpected error occurred.";
+      toast.error(`There was an error: ${errorMessage}`);
     }
   };
 
@@ -137,6 +218,25 @@ const AuthForm = ({ type }: { type: FormType }) => {
               placeholder="Enter your password"
               type="password"
             />
+
+            {!isSignIn && (
+              <>
+                <FormField
+                  control={form.control}
+                  name="profilePic"
+                  label="Profile Picture"
+                  placeholder="Upload Your Profile Picture"
+                  type="file"
+                />
+                <FormField
+                  control={form.control}
+                  name="resume"
+                  label="Resume"
+                  placeholder="Upload Your Resume"
+                  type="file"
+                />
+              </>
+            )}
 
             <Button className="btn" type="submit">
               {isSignIn ? "Sign In" : "Create an Account"}

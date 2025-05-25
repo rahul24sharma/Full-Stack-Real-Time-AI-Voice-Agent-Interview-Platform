@@ -1,5 +1,4 @@
 import { Controller, Control, FieldValues, Path } from "react-hook-form";
-
 import {
   FormItem,
   FormLabel,
@@ -13,7 +12,7 @@ interface FormFieldProps<T extends FieldValues> {
   name: Path<T>;
   label: string;
   placeholder?: string;
-  type?: "text" | "email" | "password";
+  type?: "text" | "email" | "password" | "file"; // ✅ add file
 }
 
 const FormField = <T extends FieldValues>({
@@ -31,12 +30,21 @@ const FormField = <T extends FieldValues>({
         <FormItem>
           <FormLabel className="label">{label}</FormLabel>
           <FormControl>
-            <Input
-              className="input"
-              type={type}
-              placeholder={placeholder}
-              {...field}
-            />
+            {type === "file" ? (
+              <Input
+                className="input"
+                type="file"
+                placeholder={placeholder}
+                onChange={(e) => field.onChange(e.target.files)} // ✅ only onChange
+              />
+            ) : (
+              <Input
+                className="input"
+                type={type}
+                placeholder={placeholder}
+                {...field}
+              />
+            )}
           </FormControl>
           <FormMessage />
         </FormItem>

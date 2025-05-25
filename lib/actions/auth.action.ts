@@ -1,4 +1,6 @@
 "use server";
+import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 
 import { auth, db } from "@/firebase/admin";
 import { cookies } from "next/headers";
@@ -26,7 +28,7 @@ export async function setSessionCookie(idToken: string) {
 }
 
 export async function signUp(params: SignUpParams) {
-  const { uid, name, email } = params;
+  const { uid, name, email, profileURL, resumeURL } = params;
 
   try {
     // check if user exists in db
@@ -43,6 +45,8 @@ export async function signUp(params: SignUpParams) {
       email,
       // profileURL,
       // resumeURL,
+      profileURL: profileURL || "",
+      resumeURL: resumeURL || "",
     });
 
     return {
@@ -79,8 +83,13 @@ export async function signIn(params: SignInParams) {
       };
 
     await setSessionCookie(idToken);
+    return {
+      success: true,
+      message: "Signed in successfully.",
+    };
   } catch (error: any) {
-    console.log("");
+    console.error("SignIn error:", error);
+    // console.log("");
 
     return {
       success: false,
@@ -129,4 +138,9 @@ export async function getCurrentUser(): Promise<User | null> {
 export async function isAuthenticated() {
   const user = await getCurrentUser();
   return !!user;
+}
+
+export async function logout() {
+  await signOut(); // deletes session cookie
+  redirect("/sign-in"); // redirect after logout
 }

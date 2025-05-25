@@ -81,6 +81,8 @@ interface SignUpParams {
   name: string;
   email: string;
   password: string;
+  profileURL?: string;
+  resumeURL?: string;
 }
 
 type FormType = "sign-in" | "sign-up";
