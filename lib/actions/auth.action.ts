@@ -1,12 +1,125 @@
 "use server";
 import { redirect } from "next/navigation";
-import { NextResponse } from "next/server";
+import type { DocumentData } from "firebase-admin/firestore";
 
 import { auth, db } from "@/firebase/admin";
 import { cookies } from "next/headers";
 
 // Session duration (1 week)
 const SESSION_DURATION = 60 * 60 * 24 * 7;
+const BOOTSTRAP_ADMIN_EMAIL = "sharma.rahul1@northeastern.edu";
+
+function getFirebaseErrorCode(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    return String((error as { code: unknown }).code);
+  }
+
+  return undefined;
+}
+
+async function isAdminUser(userId: string) {
+  const userRecord = await auth.getUser(userId);
+  return userRecord.customClaims?.admin === true;
+}
+
+function normalizeUser(userId: string, data: DocumentData, isAdmin: boolean) {
+  return {
+    id: userId,
+    name: String(data.name ?? ""),
+    email: String(data.email ?? ""),
+    role: isAdmin ? "admin" : "user",
+    profilePic: String(data.profilePic ?? data.profileURL ?? ""),
+    resume: String(data.resume ?? data.resumeURL ?? ""),
+  } satisfies User;
+}
+
+async function grantBootstrapAdminIfNeeded(email: string, uid: string) {
+  if (email !== BOOTSTRAP_ADMIN_EMAIL) return;
+
+  const userRecord = await auth.getUser(uid);
+  if (userRecord.customClaims?.admin === true) return;
+
+  await auth.setCustomUserClaims(uid, { admin: true });
+}
+
+async function getBootstrapAdminUserDoc(email: string) {
+  const userSnapshot = await db
+    .collection("users")
+    .where("email", "==", email)
+    .limit(1)
+    .get();
+
+  if (userSnapshot.empty) {
+    return null;
+  }
+
+  return userSnapshot.docs[0];
+}
+
+export async function createBootstrapAdminCustomToken(email: string) {
+  if (email !== BOOTSTRAP_ADMIN_EMAIL) {
+    return {
+      success: false,
+      message: "Bootstrap admin access is only available for the admin account.",
+    };
+  }
+
+  try {
+    const existingAuthUser = await auth.getUserByEmail(email).catch(() => null);
+
+    const userDoc = await getBootstrapAdminUserDoc(email);
+
+    if (!userDoc && !existingAuthUser) {
+      return {
+        success: false,
+        message:
+          "No Firestore profile was found for the admin account. Please create the user record first.",
+      };
+    }
+
+    const uid = existingAuthUser?.uid ?? userDoc?.id;
+    if (!uid) {
+      return {
+        success: false,
+        message: "Could not determine the admin account UID.",
+      };
+    }
+
+    if (!existingAuthUser) {
+      try {
+        await auth.createUser({
+          uid,
+          email,
+        });
+      } catch (error) {
+        const code = getFirebaseErrorCode(error);
+
+        if (
+          code !== "auth/uid-already-exists" &&
+          code !== "auth/email-already-exists"
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    await auth.setCustomUserClaims(uid, { admin: true });
+
+    const customToken = await auth.createCustomToken(uid, { admin: true });
+
+    return {
+      success: true,
+      customToken,
+    };
+  } catch (error) {
+    console.error("Error creating bootstrap admin token:", error);
+
+    return {
+      success: false,
+      message: "Failed to prepare the admin session. Please try again.",
+    };
+  }
+}
 
 // Set session cookie
 export async function setSessionCookie(idToken: string) {
@@ -28,36 +141,34 @@ export async function setSessionCookie(idToken: string) {
 }
 
 export async function signUp(params: SignUpParams) {
-  const { uid, name, email, profileURL, resumeURL } = params;
+  const { uid, name, email, profilePic, resume } = params;
 
   try {
-    // check if user exists in db
     const userRecord = await db.collection("users").doc(uid).get();
-    if (userRecord.exists)
+    if (userRecord.exists) {
       return {
         success: false,
         message: "User already exists. Please sign in.",
       };
+    }
 
-    // save user to db
     await db.collection("users").doc(uid).set({
+      uid,
       name,
       email,
-      // profileURL,
-      // resumeURL,
-      profileURL: profileURL || "",
-      resumeURL: resumeURL || "",
+      profilePic: profilePic || "",
+      resume: resume || "",
+      createdAt: new Date().toISOString(),
     });
 
     return {
       success: true,
       message: "Account created successfully. Please sign in.",
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error creating user:", error);
 
-    // Handle Firebase specific errors
-    if (error.code === "auth/email-already-exists") {
+    if (getFirebaseErrorCode(error) === "auth/email-already-exists") {
       return {
         success: false,
         message: "This email is already in use",
@@ -76,20 +187,33 @@ export async function signIn(params: SignInParams) {
 
   try {
     const userRecord = await auth.getUserByEmail(email);
-    if (!userRecord)
-      return {
-        success: false,
-        message: "User does not exist. Create an account.",
-      };
-
+    if (email === BOOTSTRAP_ADMIN_EMAIL) {
+      await grantBootstrapAdminIfNeeded(email, userRecord.uid);
+    }
     await setSessionCookie(idToken);
+
     return {
       success: true,
       message: "Signed in successfully.",
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("SignIn error:", error);
-    // console.log("");
+
+    if (getFirebaseErrorCode(error) === "auth/user-not-found") {
+      if (email === BOOTSTRAP_ADMIN_EMAIL) {
+        await setSessionCookie(idToken);
+
+        return {
+          success: true,
+          message: "Signed in successfully.",
+        };
+      }
+
+      return {
+        success: false,
+        message: "User does not exist. Create an account.",
+      };
+    }
 
     return {
       success: false,
@@ -114,6 +238,7 @@ export async function getCurrentUser(): Promise<User | null> {
 
   try {
     const decodedClaims = await auth.verifySessionCookie(sessionCookie, true);
+    const admin = await isAdminUser(decodedClaims.uid);
 
     // get user info from db
     const userRecord = await db
@@ -122,25 +247,38 @@ export async function getCurrentUser(): Promise<User | null> {
       .get();
     if (!userRecord.exists) return null;
 
-    return {
-      ...userRecord.data(),
-      id: userRecord.id,
-    } as User;
+    return normalizeUser(userRecord.id, userRecord.data() ?? {}, admin);
   } catch (error) {
     console.log(error);
-
-    // Invalid or expired session
     return null;
   }
 }
 
-// Check if user is authenticated
 export async function isAuthenticated() {
   const user = await getCurrentUser();
   return !!user;
 }
 
+export async function requireCurrentUser() {
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect("/sign-in");
+  }
+
+  return user;
+}
+
+export async function requireAdminUser() {
+  const user = await requireCurrentUser();
+
+  if (user.role !== "admin") {
+    redirect("/");
+  }
+
+  return user;
+}
+
 export async function logout() {
-  await signOut(); // deletes session cookie
-  redirect("/sign-in"); // redirect after logout
+  await signOut();
+  redirect("/sign-in");
 }

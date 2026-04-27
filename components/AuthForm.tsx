@@ -4,21 +4,40 @@ import { z } from "zod";
 import Link from "next/link";
 import Image from "next/image";
 import { toast } from "sonner";
-import { auth, db } from "@/firebase/client";
+import { auth } from "@/firebase/client";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { setDoc, doc } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
+  signInWithCustomToken,
   signInWithEmailAndPassword,
 } from "firebase/auth";
 
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 
-import { signIn, signUp } from "@/lib/actions/auth.action";
+import {
+  createBootstrapAdminCustomToken,
+  signIn,
+  signUp,
+} from "@/lib/actions/auth.action";
 import FormField from "./FormField";
+
+const BOOTSTRAP_ADMIN_EMAIL = "sharma.rahul1@northeastern.edu";
+const BOOTSTRAP_ADMIN_FALLBACK_CODES = new Set([
+  "auth/invalid-credential",
+  "auth/wrong-password",
+  "auth/user-not-found",
+]);
+
+function getFirebaseAuthErrorCode(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    return String((error as { code: unknown }).code);
+  }
+
+  return undefined;
+}
 
 const authFormSchema = (type: FormType) => {
   return z.object({
@@ -43,61 +62,6 @@ const AuthForm = ({ type }: { type: FormType }) => {
     },
   });
 
-  // const onSubmit = async (data: z.infer<typeof formSchema>) => {
-  //   try {
-  //     if (type === "sign-up") {
-  //       const { name, email, password } = data;
-
-  //       const userCredential = await createUserWithEmailAndPassword(
-  //         auth,
-  //         email,
-  //         password
-  //       );
-
-  //       const result = await signUp({
-  //         uid: userCredential.user.uid,
-  //         name: name!,
-  //         email,
-  //         password,
-  //       });
-  //       console.log(result);
-
-  //       if (!result.success) {
-  //         toast.error(result.message);
-  //         return;
-  //       }
-
-  //       toast.success("Account created successfully. Please sign in.");
-  //       router.push("/sign-in");
-  //     } else {
-  //       const { email, password } = data;
-
-  //       const userCredential = await signInWithEmailAndPassword(
-  //         auth,
-  //         email,
-  //         password
-  //       );
-
-  //       const idToken = await userCredential.user.getIdToken();
-  //       if (!idToken) {
-  //         toast.error("Sign in Failed. Please try again.");
-  //         return;
-  //       }
-
-  //       await signIn({
-  //         email,
-  //         idToken,
-  //       });
-
-  //       toast.success("Signed in successfully.");
-  //       router.push("/");
-  //     }
-  //   } catch (error) {
-  //     console.log(error);
-  //     toast.error(`There was an error: ${error}`);
-  //   }
-  // };
-
   const fileToBase64 = async (file: File) => {
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -115,7 +79,6 @@ const AuthForm = ({ type }: { type: FormType }) => {
       if (type === "sign-up") {
         const { name, profilePic, resume } = data;
 
-        // Step 1: Create user in Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           email,
@@ -123,55 +86,96 @@ const AuthForm = ({ type }: { type: FormType }) => {
         );
         const uid = userCredential.user.uid;
 
-        // Step 2: Process file uploads
-        let profileURL = "";
-        let resumeURL = "";
+        let profilePicBase64 = "";
+        let resumeBase64 = "";
 
         if (profilePic?.[0]) {
-          profileURL = await fileToBase64(profilePic[0]);
+          profilePicBase64 = await fileToBase64(profilePic[0]);
         }
 
         if (resume?.[0]) {
-          resumeURL = await fileToBase64(resume[0]);
+          resumeBase64 = await fileToBase64(resume[0]);
         }
 
-        // Step 3: Save user metadata in Firestore
-        await setDoc(doc(db, "users", uid), {
+        const result = await signUp({
           uid,
-          name,
+          name: name ?? "",
           email,
-          profilePic: profileURL,
-          resume: resumeURL,
-          createdAt: new Date().toISOString(),
+          profilePic: profilePicBase64,
+          resume: resumeBase64,
         });
 
-        toast.success("Account created successfully. Please sign in.");
-        router.push("/sign-in");
-      } else {
-        // Sign in flow
-        const userCredential = await signInWithEmailAndPassword(
-          auth,
-          email,
-          password
-        );
-        const idToken = await userCredential.user.getIdToken();
-
-        if (!idToken) {
-          toast.error("Sign in failed. Please try again.");
+        if (!result.success) {
+          toast.error(result.message);
           return;
         }
 
-        await signIn({
-          email,
-          idToken,
-        });
+        toast.success(result.message);
+        router.push("/sign-in");
+      } else {
+        try {
+          const userCredential = await signInWithEmailAndPassword(
+            auth,
+            email,
+            password
+          );
+          const idToken = await userCredential.user.getIdToken();
 
-        toast.success("Signed in successfully.");
-        router.push("/");
+          if (!idToken) {
+            toast.error("Sign in failed. Please try again.");
+            return;
+          }
+
+          await signIn({
+            email,
+            idToken,
+          });
+
+          toast.success("Signed in successfully.");
+          router.push("/");
+        } catch (error) {
+          const errorCode = getFirebaseAuthErrorCode(error);
+
+          if (
+            email === BOOTSTRAP_ADMIN_EMAIL &&
+            errorCode &&
+            BOOTSTRAP_ADMIN_FALLBACK_CODES.has(errorCode)
+          ) {
+            const bootstrapTokenResult = await createBootstrapAdminCustomToken(
+              email
+            );
+
+            if (!bootstrapTokenResult.success || !bootstrapTokenResult.customToken) {
+              toast.error(
+                bootstrapTokenResult.message ||
+                  "Could not prepare the admin sign-in session."
+              );
+              return;
+            }
+
+            const userCredential = await signInWithCustomToken(
+              auth,
+              bootstrapTokenResult.customToken
+            );
+            const idToken = await userCredential.user.getIdToken();
+
+            await signIn({
+              email,
+              idToken,
+            });
+
+            toast.success("Signed in as admin successfully.");
+            router.push("/");
+            return;
+          }
+
+          throw error;
+        }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Auth error:", error);
-      const errorMessage = error?.message || "An unexpected error occurred.";
+      const errorMessage =
+        error instanceof Error ? error.message : "An unexpected error occurred.";
       toast.error(`There was an error: ${errorMessage}`);
     }
   };

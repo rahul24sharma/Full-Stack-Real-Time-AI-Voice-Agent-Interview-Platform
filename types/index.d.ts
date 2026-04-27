@@ -33,9 +33,12 @@ interface CreateFeedbackParams {
 }
 
 interface User {
+  id: string;
   name: string;
   email: string;
-  id: string;
+  role: "user" | "admin";
+  profilePic?: string;
+  resume?: string;
 }
 
 interface InterviewCardProps {
@@ -80,9 +83,16 @@ interface SignUpParams {
   uid: string;
   name: string;
   email: string;
-  password: string;
-  profileURL?: string;
-  resumeURL?: string;
+  profilePic?: string;
+  resume?: string;
+}
+
+interface CreateInterviewParams {
+  role: string;
+  level: string;
+  type: string;
+  techstack: string[];
+  amount: number;
 }
 
 type FormType = "sign-in" | "sign-up";

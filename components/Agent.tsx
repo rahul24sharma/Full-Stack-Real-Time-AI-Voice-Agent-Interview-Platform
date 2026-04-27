@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
@@ -33,7 +33,8 @@ const Agent = ({
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
   const [messages, setMessages] = useState<SavedMessage[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [lastMessage, setLastMessage] = useState<string>("");
+  const lastMessage = messages.at(-1)?.content ?? "";
+  const hasSubmittedFeedback = useRef(false);
 
   useEffect(() => {
     const onCallStart = () => {
@@ -83,38 +84,45 @@ const Agent = ({
   }, []);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      setLastMessage(messages[messages.length - 1].content);
-    }
+    const handleGenerateFeedback = async (transcript: SavedMessage[]) => {
+      if (hasSubmittedFeedback.current) {
+        return;
+      }
 
-    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("handleGenerateFeedback");
+      if (!interviewId || !userId) {
+        router.push("/");
+        return;
+      }
+
+      hasSubmittedFeedback.current = true;
 
       const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId!,
-        userId: userId!,
-        transcript: messages,
+        interviewId,
+        userId,
+        transcript,
         feedbackId,
       });
 
       if (success && id) {
         router.push(`/interview/${interviewId}/feedback`);
-      } else {
-        console.log("Error saving feedback");
-        router.push("/");
+        return;
       }
+
+      router.push("/");
     };
 
     if (callStatus === CallStatus.FINISHED) {
       if (type === "generate") {
         router.push("/");
       } else {
-        handleGenerateFeedback(messages);
+        void handleGenerateFeedback(messages);
       }
     }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
+    hasSubmittedFeedback.current = false;
+    setMessages([]);
     setCallStatus(CallStatus.CONNECTING);
 
     if (type === "generate") {

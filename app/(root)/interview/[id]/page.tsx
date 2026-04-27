@@ -8,20 +8,20 @@ import {
   getFeedbackByInterviewId,
   getInterviewById,
 } from "@/lib/actions/general.action";
-import { getCurrentUser } from "@/lib/actions/auth.action";
+import { requireCurrentUser } from "@/lib/actions/auth.action";
 import DisplayTechIcons from "@/components/DisplayTechIcons";
 
 const InterviewDetails = async ({ params }: RouteParams) => {
   const { id } = await params;
 
-  const user = await getCurrentUser();
+  const user = await requireCurrentUser();
 
   const interview = await getInterviewById(id);
   if (!interview) redirect("/");
 
   const feedback = await getFeedbackByInterviewId({
     interviewId: id,
-    userId: user?.id!,
+    userId: user.id,
   });
 
   return (
@@ -48,8 +48,8 @@ const InterviewDetails = async ({ params }: RouteParams) => {
       </div>
 
       <Agent
-        userName={user?.name!}
-        userId={user?.id}
+        userName={user.name}
+        userId={user.id}
         interviewId={id}
         type="interview"
         questions={interview.questions}

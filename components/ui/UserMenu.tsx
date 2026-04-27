@@ -10,7 +10,10 @@ interface UserMenuProps {
   profilePic?: string;
 }
 
-export default function UserMenu({ userName, profilePic = "/default-profile.png" }: UserMenuProps) {
+export default function UserMenu({
+  userName,
+  profilePic = "/default-profile.png",
+}: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -45,7 +48,7 @@ export default function UserMenu({ userName, profilePic = "/default-profile.png"
       >
         <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-primary-100">
           <Image
-            src={profilePic}
+            src={profilePic || "/default-profile.png"}
             alt={`${userName}'s profile`}
             width={40}
             height={40}

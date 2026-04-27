@@ -3,27 +3,23 @@ import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import InterviewCard from "@/components/InterviewCard";
-import { redirect } from "next/navigation";
 
-import { getCurrentUser } from "@/lib/actions/auth.action";
+import { requireCurrentUser } from "@/lib/actions/auth.action";
 import {
   getInterviewsByUserId,
   getLatestInterviews,
 } from "@/lib/actions/general.action";
 
 async function Home() {
-  const user = await getCurrentUser();
-  console.log(user);
-  if (!user?.id) {
-        redirect("/sign-in");
-      }
+  const user = await requireCurrentUser();
+
   const [userInterviews, allInterview] = await Promise.all([
-    getInterviewsByUserId(user?.id!),
-    getLatestInterviews({ userId: user?.id! }),
+    getInterviewsByUserId(user.id),
+    getLatestInterviews({ userId: user.id }),
   ]);
 
-  const hasPastInterviews = userInterviews?.length! > 0;
-  const hasUpcomingInterviews = allInterview?.length! > 0;
+  const hasPastInterviews = userInterviews.length > 0;
+  const hasUpcomingInterviews = allInterview.length > 0;
 
   return (
     <>
@@ -34,9 +30,17 @@ async function Home() {
             Practice real interview questions & get instant feedback
           </p>
 
-          <Button asChild className="btn-primary max-sm:w-full">
-            <Link href="/interview">Start an Interview</Link>
-          </Button>
+          <div className="flex flex-wrap gap-3 max-sm:flex-col">
+            <Button asChild className="btn-primary max-sm:w-full">
+              <Link href="/interview">Start an Interview</Link>
+            </Button>
+
+            {user.role === "admin" && (
+              <Button asChild className="btn-secondary max-sm:w-full">
+                <Link href="/admin/interviews/new">Create Interview</Link>
+              </Button>
+            )}
+          </div>
         </div>
 
         <Image
@@ -52,11 +56,11 @@ async function Home() {
         <h2>Your Interviews</h2>
 
         <div className="interviews-section">
-          {hasPastInterviews ? (
-            userInterviews?.map((interview) => (
+            {hasPastInterviews ? (
+            userInterviews.map((interview) => (
               <InterviewCard
                 key={interview.id}
-                userId={user?.id}
+                userId={user.id}
                 interviewId={interview.id}
                 role={interview.role}
                 type={interview.type}
@@ -75,10 +79,10 @@ async function Home() {
 
         <div className="interviews-section">
           {hasUpcomingInterviews ? (
-            allInterview?.map((interview) => (
+            allInterview.map((interview) => (
               <InterviewCard
                 key={interview.id}
-                userId={user?.id}
+                userId={user.id}
                 interviewId={interview.id}
                 role={interview.role}
                 type={interview.type}

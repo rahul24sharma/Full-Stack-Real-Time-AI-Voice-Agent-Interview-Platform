@@ -24,18 +24,13 @@
 // };
 
 // export default Layout;
-import { getCurrentUser } from "@/lib/actions/auth.action";
-import { redirect } from "next/navigation";
+import { requireCurrentUser } from "@/lib/actions/auth.action";
 import UserMenu from "@/components/ui/UserMenu";
 import Image from "next/image";
 import Link from "next/link";
 
 const Layout = async ({ children }: { children: React.ReactNode }) => {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    redirect("/sign-in");
-  }
+  const user = await requireCurrentUser();
 
   return (
     <div className="root-layout">
