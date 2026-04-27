@@ -24,7 +24,7 @@ import {
 } from "@/lib/actions/auth.action";
 import FormField from "./FormField";
 
-const BOOTSTRAP_ADMIN_EMAIL = "sharma.rahul1@northeastern.edu";
+const BOOTSTRAP_ADMIN_EMAIL = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 const BOOTSTRAP_ADMIN_FALLBACK_CODES = new Set([
   "auth/invalid-credential",
   "auth/wrong-password",
